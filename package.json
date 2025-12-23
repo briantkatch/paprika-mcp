@@ -1,0 +1,12 @@
+{
+  "name": "paprika-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for Paprika recipe manager",
+  "private": true,
+  "scripts": {
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "husky": "^9.0.0"
+  }
+}
