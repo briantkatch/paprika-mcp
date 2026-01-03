@@ -6,10 +6,14 @@ import os
 import unicodedata
 from typing import Any
 
+import requests
 from paprika_recipes.cache import DirectoryCache
 from paprika_recipes.remote import Remote
 
 logger = logging.getLogger(__name__)
+
+# Module-level cache for categories (persists for server lifetime)
+_categories_cache: dict[str, dict[str, str]] | None = None
 
 
 def get_credentials() -> tuple[str, str]:
@@ -124,6 +128,88 @@ def get_remote() -> Remote:
         raise
 
 
+def get_categories(bearer_token: str) -> dict[str, Any]:
+    """Get all categories from Paprika API with caching.
+
+    Returns a dict with:
+    - 'uid_to_name': mapping of UUID to category name
+    - 'name_to_uid': mapping of lowercase name to UUID
+    - 'all': list of all category dicts
+    - 'by_uid': mapping of UUID to full category dict
+
+    Results are cached for the lifetime of the server process.
+    """
+    global _categories_cache
+
+    # Return cached version if available
+    if _categories_cache is not None:
+        return _categories_cache
+
+    # Fetch from API
+    headers = {"Authorization": f"Bearer {bearer_token}"}
+    try:
+        resp = requests.get(
+            "https://www.paprikaapp.com/api/v2/sync/categories/",
+            headers=headers,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        categories = data.get("result", [])
+
+        # Build mappings
+        uid_to_name = {}
+        name_to_uid = {}
+        by_uid = {}
+
+        for cat in categories:
+            uid = cat["uid"]
+            name = cat.get("name", "")
+            if name:
+                uid_to_name[uid] = name
+                name_to_uid[name.lower()] = uid
+                by_uid[uid] = cat
+
+        _categories_cache = {
+            "uid_to_name": uid_to_name,
+            "name_to_uid": name_to_uid,
+            "all": categories,
+            "by_uid": by_uid,
+        }
+
+        return _categories_cache
+
+    except requests.RequestException as e:
+        logger.warning(f"Failed to fetch categories: {e}")
+        # Return empty mappings on error
+        return {
+            "uid_to_name": {},
+            "name_to_uid": {},
+            "all": [],
+            "by_uid": {},
+        }
+
+
+def translate_category_uids(uids: list[str], bearer_token: str) -> str:
+    """Translate a list of category UUIDs to comma-separated names.
+
+    Args:
+        uids: List of category UUIDs
+        bearer_token: Paprika API bearer token
+
+    Returns:
+        Comma-separated string of category names
+    """
+    if not uids:
+        return ""
+
+    categories = get_categories(bearer_token)
+    uid_to_name = categories["uid_to_name"]
+
+    names = [uid_to_name.get(uid, f"Unknown-{uid[:8]}") for uid in uids]
+    return ", ".join(names)
+
+
 def normalize_string(text: str) -> str:
     """Normalize unicode string for comparison.
 
@@ -134,9 +220,15 @@ def normalize_string(text: str) -> str:
 
 
 def search_in_text(
-    text: str, query: str, context_lines: int = 2
+    text: str, query: str, context_lines: int = 2, regex: bool = False
 ) -> list[dict[str, Any]]:
     """Search for query in text and return matches with context.
+
+    Args:
+        text: Text to search in
+        query: Search query (plain text or regex pattern)
+        context_lines: Number of lines of context around matches
+        regex: If True, treat query as a regex pattern
 
     Returns list of dicts with 'line', 'match', and 'context' keys.
     """
@@ -145,15 +237,38 @@ def search_in_text(
 
     matches = []
     lines = text.split("\n")
-    query_lower = query.lower()
 
-    for i, line in enumerate(lines):
-        if query_lower in line.lower():
-            # Get context lines before and after
-            start = max(0, i - context_lines)
-            end = min(len(lines), i + context_lines + 1)
-            context = "\n".join(lines[start:end])
+    if regex:
+        import re
 
-            matches.append({"line": i + 1, "match": line.strip(), "context": context})
+        try:
+            pattern = re.compile(query, re.IGNORECASE)
+        except re.error as e:
+            # Invalid regex - return empty results
+            logger.warning(f"Invalid regex pattern '{query}': {e}")
+            return []
+
+        for i, line in enumerate(lines):
+            if pattern.search(line):
+                # Get context lines before and after
+                start = max(0, i - context_lines)
+                end = min(len(lines), i + context_lines + 1)
+                context = "\n".join(lines[start:end])
+
+                matches.append(
+                    {"line": i + 1, "match": line.strip(), "context": context}
+                )
+    else:
+        query_lower = query.lower()
+        for i, line in enumerate(lines):
+            if query_lower in line.lower():
+                # Get context lines before and after
+                start = max(0, i - context_lines)
+                end = min(len(lines), i + context_lines + 1)
+                context = "\n".join(lines[start:end])
+
+                matches.append(
+                    {"line": i + 1, "match": line.strip(), "context": context}
+                )
 
     return matches

@@ -4,7 +4,7 @@ from typing import Any
 
 from mcp.types import TextContent
 
-from ..utils import get_remote, search_in_text
+from ..utils import get_categories, get_remote, search_in_text, translate_category_uids
 
 
 async def search_recipes_tool(args: dict[str, Any]) -> list[TextContent]:
@@ -14,6 +14,8 @@ async def search_recipes_tool(args: dict[str, Any]) -> list[TextContent]:
     context_lines = args.get("context_lines", 2)
     page = args.get("page", 1)
     page_size = args.get("page_size", 20)
+    regex = args.get("regex", False)
+    category_filter = args.get("category", None)
 
     # Get the remote
     remote = get_remote()
@@ -22,14 +24,35 @@ async def search_recipes_tool(args: dict[str, Any]) -> list[TextContent]:
     all_recipes = [r for r in remote.recipes if not r.in_trash]
     all_recipes.sort(key=lambda r: r.name.lower())
 
+    # Get category mappings for translating UUIDs to names
+    categories_data = get_categories(remote.bearer_token)
+    category_name_to_uid = categories_data["name_to_uid"]
+
     results = []
 
     for recipe in all_recipes:
+        # Filter by category if specified
+        if category_filter:
+            # Try to match by category name (case-insensitive)
+            category_uid = category_name_to_uid.get(category_filter.lower())
+            if category_uid:
+                # Match by resolved UID
+                if category_uid not in (recipe.categories or []):
+                    continue
+            else:
+                # No matching category name found, skip this recipe
+                continue
+
+        # Translate category UUIDs to names for searching
+        category_names = translate_category_uids(
+            recipe.categories or [], remote.bearer_token
+        )
+
         # Determine which fields to search
         searchable_fields = {
             "name": recipe.name,
             "ingredients": recipe.ingredients,
-            "categories": ", ".join(recipe.categories) if recipe.categories else "",
+            "categories": category_names,  # Now using translated names
             "directions": recipe.directions,
             "notes": recipe.notes or "",
         }
@@ -57,7 +80,7 @@ async def search_recipes_tool(args: dict[str, Any]) -> list[TextContent]:
             if not field_text:
                 continue
 
-            matches = search_in_text(field_text, query, context_lines)
+            matches = search_in_text(field_text, query, context_lines, regex=regex)
             if matches:
                 results.append(
                     {
@@ -70,8 +93,12 @@ async def search_recipes_tool(args: dict[str, Any]) -> list[TextContent]:
 
     if not results:
         query_text = query if query else "(empty query)"
+        category_text = f" in category '{category_filter}'" if category_filter else ""
         return [
-            TextContent(type="text", text=f"No recipes found matching '{query_text}'")
+            TextContent(
+                type="text",
+                text=f"No recipes found matching '{query_text}'{category_text}",
+            )
         ]
 
     # Count unique recipes
@@ -85,8 +112,10 @@ async def search_recipes_tool(args: dict[str, Any]) -> list[TextContent]:
 
     # Format results
     query_text = f"'{query}'" if query else "all recipes"
+    category_text = f" in category '{category_filter}'" if category_filter else ""
+    regex_text = " (regex)" if regex else ""
     output_lines = [
-        f"Found {unique_recipes} recipes with {len(results)} total matches for {query_text}",
+        f"Found {unique_recipes} recipes with {len(results)} total matches for {query_text}{regex_text}{category_text}",
         f"Page {page} of {total_pages} (showing {len(paginated_results)} results)\n",
     ]
 
@@ -116,7 +145,15 @@ TOOL_DEFINITION = {
         "Returns recipe IDs, titles, and context for each match. "
         "Use an empty query ('') to get all recipes. "
         "Results are paginated and sorted alphabetically. "
-        "Only non-trashed recipes are included."
+        "Only non-trashed recipes are included.\n\n"
+        "REGEX SEARCH: Set regex=true to use regular expressions. "
+        "This is especially useful for matching singular/plural forms of ingredients:\n"
+        "  - 'cherr(y|ies)' matches both 'cherry' and 'cherries'\n"
+        "  - 'bananas?' matches 'banana' or 'bananas'\n"
+        "  - 'tomat(o|oes)' matches 'tomato' or 'tomatoes'\n"
+        "  - '(beef|chicken|pork)' matches any of these meats\n\n"
+        "CATEGORY SEARCH: Use the 'category' parameter to filter by category name (not UUID). "
+        "Use list_categories tool first to see available categories."
     ),
     "inputSchema": {
         "type": "object",
@@ -124,6 +161,23 @@ TOOL_DEFINITION = {
             "query": {
                 "type": "string",
                 "description": "Text to search for in recipes. Use empty string '' to get all recipes.",
+            },
+            "regex": {
+                "type": "boolean",
+                "description": (
+                    "If true, treat query as a regex pattern. "
+                    "Useful for matching singular/plural: 'cherr(y|ies)', 'bananas?', 'tomat(o|oes)'. "
+                    "Default: false"
+                ),
+                "default": False,
+            },
+            "category": {
+                "type": "string",
+                "description": (
+                    "Filter results to only recipes in this category. "
+                    "Use the category NAME (not UUID). "
+                    "Use list_categories tool to see available categories."
+                ),
             },
             "fields": {
                 "type": "array",

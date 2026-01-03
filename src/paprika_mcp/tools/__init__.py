@@ -2,6 +2,8 @@
 
 from .format_fraction import TOOL_DEFINITION as FORMAT_FRACTION_DEF
 from .format_fraction import format_fraction_tool
+from .list_categories import TOOL_DEFINITION as LIST_CATEGORIES_DEF
+from .list_categories import list_categories_tool
 from .read_recipe import TOOL_DEFINITION as READ_RECIPE_DEF
 from .read_recipe import read_recipe_tool
 from .search_recipes import TOOL_DEFINITION as SEARCH_RECIPES_DEF
@@ -23,6 +25,10 @@ TOOLS = {
         "definition": UPDATE_RECIPE_DEF,
         "handler": update_recipe_tool,
     },
+    "list_categories": {
+        "definition": LIST_CATEGORIES_DEF,
+        "handler": list_categories_tool,
+    },
     "format_fraction": {
         "definition": FORMAT_FRACTION_DEF,
         "handler": format_fraction_tool,
@@ -34,5 +40,6 @@ __all__ = [
     "search_recipes_tool",
     "read_recipe_tool",
     "update_recipe_tool",
+    "list_categories_tool",
     "format_fraction_tool",
 ]
