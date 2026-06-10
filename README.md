@@ -27,6 +27,67 @@ This will:
 1. Install paprika-mcp with dependencies
 2. Set up pre-commit hooks (if npm available)
 
+## Docker
+
+A container image is published to the GitHub Container Registry on each release.
+The container runs the server over **Streamable HTTP** transport: it's a
+long-running service that exposes the MCP endpoint at `/mcp` (default port
+`8080`) plus a `/healthz` liveness route. Clients connect over the network with
+an HTTP (URL) transport rather than spawning a process.
+
+### docker-compose
+
+Save the following as `docker-compose.yml`:
+
+```yaml
+services:
+  paprika-mcp:
+    image: ghcr.io/briantkatch/paprika-mcp:latest
+    ports:
+      - "8080:8080"
+    environment:
+      PAPRIKA_EMAIL: ${PAPRIKA_EMAIL:-}
+      PAPRIKA_PASSWORD: ${PAPRIKA_PASSWORD:-}
+      PAPRIKA_USER_AGENT: ${PAPRIKA_USER_AGENT:-}
+```
+
+Provide credentials via an `.env` file next to it (Compose loads it
+automatically), then start it with `docker compose up -d`:
+
+```bash
+# .env
+PAPRIKA_EMAIL=your@email.com
+PAPRIKA_PASSWORD=yourpassword
+# Required in a container: the API rejects logins with an unrecognized
+# User-Agent, and auto-detection only works when the Paprika macOS app is
+# installed. Supply a macOS-app-style string (adjust versions to taste):
+PAPRIKA_USER_AGENT=Paprika Recipe Manager 3/3.3.1 (com.hindsightlabs.paprika.mac.v3; build:3.3.1; macOS 14.4.1)
+```
+
+### Configure your MCP client
+
+Point the client at the server's URL:
+
+```json
+{
+  "mcpServers": {
+    "paprika": {
+      "url": "http://localhost:8080/mcp"
+    }
+  }
+}
+```
+
+The container exposes a `/healthz` endpoint (used by the Docker `HEALTHCHECK`)
+that reports server liveness and whether credentials are configured:
+
+```bash
+curl http://localhost:8080/healthz   # {"status":"ok"}
+```
+
+> The HTTP endpoint has no authentication of its own — only bind it to a trusted
+> network, or place it behind a reverse proxy/auth layer before exposing it.
+
 ## Manual Installation
 
 If you prefer manual setup:

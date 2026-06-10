@@ -1,0 +1,17 @@
+.git
+.github
+.husky
+.venv
+node_modules
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.mypy_cache
+.ruff_cache
+.pytest_cache
+dist
+build
+docker-compose.yml
+Dockerfile
+.dockerignore

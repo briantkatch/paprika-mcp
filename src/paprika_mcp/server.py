@@ -1,14 +1,22 @@
 """MCP server for Paprika recipe manager."""
 
 import asyncio
+import contextlib
 import logging
+import os
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.types import Prompt, Tool
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse, PlainTextResponse, Response
+from starlette.routing import Mount, Route
 
 from .prompts import PROMPTS
 from .tools import TOOLS
+from .utils import get_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +69,57 @@ async def main():
 
 
 def run():
-    """Entry point for the server."""
+    """Entry point for the stdio server."""
     asyncio.run(main())
+
+
+def build_http_app() -> Starlette:
+    """Build a Starlette app exposing the MCP server over Streamable HTTP.
+
+    The MCP endpoint is mounted at ``/mcp``; clients connect with an HTTP
+    (URL) transport. A plain ``/healthz`` route provides a Docker liveness
+    probe that bypasses the MCP session handshake.
+    """
+    session_manager = StreamableHTTPSessionManager(app=app)
+
+    async def handle_mcp(scope, receive, send):
+        await session_manager.handle_request(scope, receive, send)
+
+    async def healthz(request: Request) -> Response:
+        """Liveness/readiness probe.
+
+        Confirms the HTTP server is serving and that Paprika credentials are
+        configured. It deliberately does not perform a network login on every
+        probe, which would risk rate limiting.
+        """
+        try:
+            get_credentials()
+        except ValueError as e:
+            return PlainTextResponse(f"unhealthy: {e}", status_code=503)
+        return JSONResponse({"status": "ok"})
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_: Starlette):
+        async with session_manager.run():
+            yield
+
+    return Starlette(
+        routes=[
+            Route("/healthz", healthz, methods=["GET"]),
+            Mount("/mcp", app=handle_mcp),
+        ],
+        lifespan=lifespan,
+    )
+
+
+def run_http(host: str | None = None, port: int | None = None) -> None:
+    """Entry point for the HTTP server."""
+    import uvicorn
+
+    host = host or os.environ.get("HOST", "0.0.0.0")
+    port = port or int(os.environ.get("PORT", "8080"))
+    logger.info("Starting Paprika MCP HTTP server on %s:%d (endpoint /mcp)", host, port)
+    uvicorn.run(build_http_app(), host=host, port=port)
 
 
 if __name__ == "__main__":

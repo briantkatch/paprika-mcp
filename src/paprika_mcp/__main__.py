@@ -51,14 +51,23 @@ def setup_credentials():
 
 
 def main():
-    """Main CLI entry point."""
+    """Main CLI entry point (stdio transport by default)."""
     if len(sys.argv) > 1 and sys.argv[1] == "setup":
         setup_credentials()
+    elif len(sys.argv) > 1 and sys.argv[1] == "web":
+        main_web()
     else:
-        # Start the server
+        # Start the stdio server
         from paprika_mcp.server import run
 
         run()
+
+
+def main_web():
+    """Entry point for the HTTP (Streamable HTTP) server."""
+    from paprika_mcp.server import run_http
+
+    run_http()
 
 
 if __name__ == "__main__":
