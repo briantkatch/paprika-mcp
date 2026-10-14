@@ -23,7 +23,7 @@ authors = [
     { name = "Brian Tkatch" }
 ]
 dependencies = [
-    "mcp>=1.0.0",
+    "mcp>=1.0.0,<2",
     "paprika-recipes @ git+https://github.com/briantkatch/paprika-recipes@2.5.2",
 ]
 
